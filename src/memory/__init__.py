@@ -5,6 +5,7 @@ from src.memory.base import (
     TrajectoryData,
     MemoryStatus,
 )
+from src.memory.dual_buffer import DualBufferMemory
 
 __all__ = [
     "BaseMemoryProvider",
@@ -12,4 +13,5 @@ __all__ = [
     "MemoryResponse",
     "TrajectoryData",
     "MemoryStatus",
+    "DualBufferMemory",
 ]
