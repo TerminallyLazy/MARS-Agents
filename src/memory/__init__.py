@@ -7,6 +7,7 @@ from src.memory.base import (
 )
 from src.memory.dual_buffer import DualBufferMemory
 from src.memory.tree import MemoryNode, MemoryTree
+from src.memory.hierarchical import HierarchicalMemory
 
 __all__ = [
     "BaseMemoryProvider",
@@ -17,4 +18,5 @@ __all__ = [
     "DualBufferMemory",
     "MemoryNode",
     "MemoryTree",
+    "HierarchicalMemory",
 ]

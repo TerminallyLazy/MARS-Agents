@@ -50,6 +50,10 @@ class MemoryResponse(BaseModel):
         default="hybrid",
         description="Memory source: 'short_term', 'long_term', 'hybrid'",
     )
+    additional_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra parameters (e.g., tree_path, tree_node)",
+    )
 
 
 class TrajectoryData(BaseModel):
