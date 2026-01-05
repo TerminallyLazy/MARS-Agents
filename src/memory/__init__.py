@@ -6,6 +6,7 @@ from src.memory.base import (
     MemoryStatus,
 )
 from src.memory.dual_buffer import DualBufferMemory
+from src.memory.tree import MemoryNode, MemoryTree
 
 __all__ = [
     "BaseMemoryProvider",
@@ -14,4 +15,6 @@ __all__ = [
     "TrajectoryData",
     "MemoryStatus",
     "DualBufferMemory",
+    "MemoryNode",
+    "MemoryTree",
 ]
