@@ -36,12 +36,9 @@ export function LandingScreen({ onSubmit, className }: LandingScreenProps) {
           <div className="flex items-center justify-center gap-3">
             <div
               className={cn(
-                'flex items-center justify-center w-14 h-14 rounded-2xl',
-                'bg-gradient-to-br from-[var(--accent-secondary)] to-[var(--accent-deep)]',
-                'shadow-lg shadow-[var(--accent-secondary)]/25'
               )}
             >
-              <Icon name="smart_toy" size="xl" className="text-white" />
+              <img src="/mars-af-logo1.png" alt="Mars Agent Framework" className="w-40 h-40 object-contain" />
             </div>
           </div>
           <h1 className="text-4xl font-bold text-[var(--text-loud)] tracking-tight">

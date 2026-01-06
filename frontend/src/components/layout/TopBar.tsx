@@ -62,14 +62,11 @@ export function TopBar({
           <Icon name="menu" />
         </Button>
         <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              'flex items-center justify-center w-8 h-8 rounded-lg',
-              'bg-gradient-to-br from-[var(--accent-secondary)] to-[var(--accent-deep)]'
-            )}
-          >
-            <Icon name="smart_toy" size="sm" className="text-white" />
-          </div>
+          <img
+            src="/mars-af-logo1.svg"
+            alt="MARS"
+            className="w-8 h-8"
+          />
           <span className="font-semibold text-[var(--text-loud)]">
             MARS Agent Framework
           </span>

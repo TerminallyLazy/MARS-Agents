@@ -63,16 +63,7 @@ export function InputBar({
         )}
       />
       
-      <div className="flex items-center justify-between px-3 pb-3">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" disabled={disabled}>
-            <Icon name="attach_file" size="sm" />
-          </Button>
-          <Button variant="ghost" size="icon-sm" disabled={disabled}>
-            <Icon name="apps" size="sm" />
-          </Button>
-        </div>
-        
+      <div className="flex items-center justify-end px-3 pb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs text-[var(--text-subtle)]">
             {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to send

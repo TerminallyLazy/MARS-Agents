@@ -86,19 +86,40 @@ function MainApp() {
     })
   }, [addConvexTrace])
 
+  const traceQueueRef = useRef<typeof traces>([])
+  const traceFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
+    const flushTraces = () => {
+      if (traceQueueRef.current.length === 0 || !sessionIdRef.current) return
+      
+      const toFlush = traceQueueRef.current.splice(0, 5)
+      toFlush.forEach(trace => {
+        persistTrace(trace.nodeId, trace.event, trace.message, trace.payload)
+      })
+      
+      if (traceQueueRef.current.length > 0) {
+        traceFlushTimeoutRef.current = setTimeout(flushTraces, 500)
+      }
+    }
+
     const unsubscribe = useAgentStore.subscribe((state, prevState) => {
       if (sessionIdRef.current && state.traces.length > prevState.traces.length) {
-        const newTrace = state.traces[state.traces.length - 1]
-        persistTrace(
-          newTrace.nodeId,
-          newTrace.event,
-          newTrace.message,
-          newTrace.payload
-        )
+        const newTraces = state.traces.slice(prevState.traces.length)
+        traceQueueRef.current.push(...newTraces)
+        
+        if (!traceFlushTimeoutRef.current) {
+          traceFlushTimeoutRef.current = setTimeout(flushTraces, 300)
+        }
       }
     })
-    return unsubscribe
+    
+    return () => {
+      unsubscribe()
+      if (traceFlushTimeoutRef.current) {
+        clearTimeout(traceFlushTimeoutRef.current)
+      }
+    }
   }, [persistTrace])
 
   const handleStartTask = useCallback(async (prompt: string) => {

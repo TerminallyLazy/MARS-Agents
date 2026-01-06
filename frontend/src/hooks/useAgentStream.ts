@@ -70,13 +70,6 @@ export function useAgentStream() {
         ? '/api/research/gemini/stream' 
         : '/api/runs/stream'
 
-      addTrace({
-        nodeId: 'system',
-        event: 'custom',
-        timestamp: new Date(),
-        message: `Using ${researchBackend === 'gemini' ? 'Gemini Deep Research' : 'LangGraph'} backend`,
-      })
-
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -175,12 +168,6 @@ export function useAgentStream() {
 
       switch (eventType) {
         case 'run_start':
-          addTrace({
-            nodeId: 'system',
-            event: 'custom',
-            timestamp: new Date(),
-            message: `Starting research: ${data.task || 'task'}`,
-          })
           break
 
         case 'node_start': {
@@ -237,12 +224,6 @@ export function useAgentStream() {
 
               if (output.is_boosted === true) {
                 setBoosted(true)
-                addTrace({
-                  nodeId: 'system',
-                  event: 'custom',
-                  timestamp: new Date(),
-                  message: 'RECURSIVE BOOST ACTIVATED',
-                })
               }
             }
 
@@ -294,13 +275,6 @@ export function useAgentStream() {
           const message = data.message as string
           if (message) {
             updateProgressMessage('system', 'progress', message)
-            
-            addTrace({
-              nodeId: 'system',
-              event: 'custom',
-              timestamp: new Date(),
-              message: message,
-            })
           }
           break
         }
@@ -389,25 +363,10 @@ export function useAgentStream() {
             setMessageMetadata(progressMessageIdRef.current, { isStreaming: false })
             progressMessageIdRef.current = null
           }
-          
-          addTrace({
-            nodeId: 'system',
-            event: 'end',
-            timestamp: new Date(),
-            message: `Research completed: ${data.status}`,
-          })
           break
 
         default:
-          if (eventType.startsWith('custom_')) {
-            addTrace({
-              nodeId: 'system',
-              event: 'custom',
-              timestamp: new Date(),
-              message: eventType.replace('custom_', ''),
-              payload: data,
-            })
-          }
+          break
       }
     },
     [

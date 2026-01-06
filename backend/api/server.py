@@ -227,14 +227,20 @@ async def stream_run(request: RunRequest):
     )
 
 
-async def _execute_gemini_stream(client, task: str):
-    return client.interactions.create(
-        input=task,
-        agent="deep-research-pro-preview-12-2025",
-        background=True,
-        stream=True,
-        agent_config={"type": "deep-research", "thinking_summaries": "auto"},
-    )
+def _stream_gemini_to_queue(client, task: str, queue: asyncio.Queue, loop):
+    try:
+        stream = client.interactions.create(
+            input=task,
+            agent="deep-research-pro-preview-12-2025",
+            background=True,
+            stream=True,
+            agent_config={"type": "deep-research", "thinking_summaries": "auto"},
+        )
+        for chunk in stream:
+            loop.call_soon_threadsafe(queue.put_nowait, chunk)
+        loop.call_soon_threadsafe(queue.put_nowait, None)
+    except Exception as e:
+        loop.call_soon_threadsafe(queue.put_nowait, e)
 
 
 def _is_retryable_error(error: Exception) -> bool:
@@ -275,18 +281,27 @@ async def stream_gemini_research(task: str) -> AsyncGenerator[str, None]:
                 {"name": "gemini", "task": "Deep Research analysis"},
             )
 
-            stream = await asyncio.wait_for(
-                asyncio.to_thread(_execute_gemini_stream, client, task),
-                timeout=GEMINI_TIMEOUT_SECONDS,
-            )
+            queue: asyncio.Queue = asyncio.Queue()
+            loop = asyncio.get_event_loop()
+
+            thread = asyncio.to_thread(_stream_gemini_to_queue, client, task, queue, loop)
+            asyncio.create_task(thread)
 
             interaction_id = None
             current_draft = ""
             token_count = 0
-            last_activity = asyncio.get_event_loop().time()
+            start_time = asyncio.get_event_loop().time()
 
-            for chunk in stream:
-                last_activity = asyncio.get_event_loop().time()
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), timeout=GEMINI_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    raise asyncio.TimeoutError(f"No response for {GEMINI_TIMEOUT_SECONDS}s")
+
+                if chunk is None:
+                    break
+                if isinstance(chunk, Exception):
+                    raise chunk
 
                 if chunk.event_type == "interaction.start":
                     interaction_id = chunk.interaction.id

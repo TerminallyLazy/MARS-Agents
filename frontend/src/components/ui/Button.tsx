@@ -8,21 +8,22 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          'bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-deep)]',
+          'bg-[var(--accent-primary)] text-white shadow-[0_2px_4px_rgba(124,92,255,0.2)] hover:bg-[var(--accent-deep)] hover:shadow-[0_4px_8px_rgba(124,92,255,0.3)] hover:-translate-y-px',
         secondary:
-          'bg-[var(--bg-tertiary)] text-[var(--text-default)] border border-[var(--border-default)] hover:bg-[var(--border-subtle)] hover:border-[var(--border-strong)]',
+          'bg-[var(--bg-secondary)] text-[var(--text-default)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] hover:bg-[var(--bg-tertiary)] hover:border-[var(--border-strong)]',
         ghost:
           'bg-transparent text-[var(--text-muted)] hover:bg-[var(--overlay-light)] hover:text-[var(--text-default)]',
         destructive:
           'bg-[var(--color-error)] text-white hover:bg-[var(--color-error)]/90',
         outline:
-          'border border-[var(--border-default)] bg-transparent hover:bg-[var(--bg-tertiary)] text-[var(--text-default)]',
-        link: 'text-[var(--accent-secondary)] underline-offset-4 hover:underline',
+          'border-[1.5px] border-dashed border-[var(--border-dashed)] bg-transparent text-[var(--text-default)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-light)]',
+        link: 'text-[var(--accent-primary)] underline-offset-4 hover:underline',
       },
       size: {
         sm: 'h-8 px-3 text-xs',
         md: 'h-9 px-4',
         lg: 'h-10 px-6',
+        xl: 'h-11 px-8 text-base',
         icon: 'h-9 w-9',
         'icon-sm': 'h-8 w-8',
       },
