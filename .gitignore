@@ -7,3 +7,14 @@ __pycache__/
 *.egg-info/
 .ruff_cache/
 .langgraph_api/
+
+GEMINI_DEEP_RESEARCH.md
+
+nognog.md
+
+*/tests/
+
+.sisyphus/plans/001-mars-ui-comprehensive-plan.md
+**/skills/
+docs/plans/2025-01-05-hgm-memevolve-gepa-integration.md
+diagram.mmd

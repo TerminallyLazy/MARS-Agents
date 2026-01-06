@@ -769,7 +769,9 @@ graph = workflow.compile()
 
 def run_multi_agent_system(user_input: str) -> dict:
     initial_state = create_initial_state(user_input)
-    final_state = graph.invoke(initial_state)
+    # 6 specialists + 8 linear nodes per iteration = ~14 transitions/iteration
+    # max_iterations=7 → need ~100+ limit for safety
+    final_state = graph.invoke(initial_state, {"recursion_limit": 150})
     return {
         "document": final_state.get("final_document", ""),
         "diagram": final_state.get("diagram", ""),
