@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useMutation, useQuery } from 'convex/react'
+import { api } from '../convex/_generated/api'
 import { LandingScreen } from '@/components/landing/LandingScreen'
 import { AppShell } from '@/components/layout/AppShell'
 import { SplitPane } from '@/components/layout/SplitPane'
@@ -14,6 +16,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStream } from '@/hooks/useAgentStream'
 import { GRAPH_NODES } from '@/lib/constants'
+import type { Id } from '../convex/_generated/dataModel'
 
 const queryClient = new QueryClient()
 
@@ -22,6 +25,19 @@ type AppView = 'landing' | 'workspace'
 function MainApp() {
   const [view, setView] = useState<AppView>('landing')
   const [inputValue, setInputValue] = useState('')
+  const sessionIdRef = useRef<Id<"sessions"> | null>(null)
+
+  const createSession = useMutation(api.sessions.create)
+  const addConvexMessage = useMutation(api.messages.add)
+  const addConvexTrace = useMutation(api.traces.add)
+  const convexMessages = useQuery(
+    api.messages.listBySession,
+    sessionIdRef.current ? { sessionId: sessionIdRef.current } : "skip"
+  )
+  const convexTraces = useQuery(
+    api.traces.listBySession,
+    sessionIdRef.current ? { sessionId: sessionIdRef.current } : "skip"
+  )
 
   const {
     isRunning,
@@ -32,24 +48,130 @@ function MainApp() {
     currentDraft,
     diagram,
     clearTraces,
+    reset: resetAgentStore,
+    addTrace,
   } = useAgentStore()
 
-  const { messages, isStreaming, addMessage } = useChatStore()
+  const { messages, isStreaming, addMessage, clearMessages } = useChatStore()
   const { startStream } = useAgentStream()
   const researchBackend = useSettingsStore((s) => s.researchBackend)
 
-  const handleStartTask = (prompt: string) => {
+  const persistMessage = useCallback(async (
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    metadata?: { iteration?: number; score?: number; nodeId?: string; isStreaming?: boolean }
+  ) => {
+    if (!sessionIdRef.current) return
+    await addConvexMessage({
+      sessionId: sessionIdRef.current,
+      role,
+      content,
+      ...metadata,
+    })
+  }, [addConvexMessage])
+
+  const persistTrace = useCallback(async (
+    nodeId: string,
+    event: 'start' | 'end' | 'error' | 'output' | 'custom',
+    message?: string,
+    payload?: Record<string, unknown>
+  ) => {
+    if (!sessionIdRef.current) return
+    await addConvexTrace({
+      sessionId: sessionIdRef.current,
+      nodeId,
+      event,
+      message,
+      payload: payload ? JSON.stringify(payload) : undefined,
+    })
+  }, [addConvexTrace])
+
+  useEffect(() => {
+    const unsubscribe = useAgentStore.subscribe((state, prevState) => {
+      if (sessionIdRef.current && state.traces.length > prevState.traces.length) {
+        const newTrace = state.traces[state.traces.length - 1]
+        persistTrace(
+          newTrace.nodeId,
+          newTrace.event,
+          newTrace.message,
+          newTrace.payload
+        )
+      }
+    })
+    return unsubscribe
+  }, [persistTrace])
+
+  const handleStartTask = useCallback(async (prompt: string) => {
+    const sessionId = await createSession({
+      name: prompt.slice(0, 50) + (prompt.length > 50 ? '...' : ''),
+      task: prompt,
+      backend: researchBackend,
+      maxIterations: 7,
+    })
+    sessionIdRef.current = sessionId
+
     addMessage({ role: 'user', content: prompt })
+    await persistMessage('user', prompt)
+
     setView('workspace')
     setInputValue('')
     startStream(prompt)
-  }
+  }, [createSession, researchBackend, addMessage, persistMessage, startStream])
 
   const handleSendMessage = () => {
     if (inputValue.trim()) {
       handleStartTask(inputValue.trim())
     }
   }
+
+  const handleSelectSession = useCallback((sessionId: Id<"sessions">) => {
+    sessionIdRef.current = sessionId
+    clearMessages()
+    resetAgentStore()
+    setView('workspace')
+  }, [clearMessages, resetAgentStore])
+
+  const handleNewSession = useCallback(() => {
+    sessionIdRef.current = null
+    clearMessages()
+    resetAgentStore()
+    setView('landing')
+  }, [clearMessages, resetAgentStore])
+
+  useEffect(() => {
+    if (convexMessages && sessionIdRef.current) {
+      clearMessages()
+      convexMessages.forEach(msg => {
+        addMessage({
+          role: msg.role,
+          content: msg.content,
+          metadata: {
+            iteration: msg.iteration ?? undefined,
+            score: msg.score ?? undefined,
+            previousScore: msg.previousScore ?? undefined,
+            nodeId: msg.nodeId ?? undefined,
+            isStreaming: msg.isStreaming ?? undefined,
+          }
+        })
+      })
+    }
+  }, [convexMessages, addMessage, clearMessages])
+
+  useEffect(() => {
+    if (convexTraces && sessionIdRef.current) {
+      clearTraces()
+      convexTraces.forEach(trace => {
+        addTrace({
+          nodeId: trace.nodeId,
+          event: trace.event,
+          timestamp: new Date(trace._creationTime),
+          message: trace.message ?? undefined,
+          duration: trace.duration ?? undefined,
+          payload: trace.payload ? JSON.parse(trace.payload) : undefined,
+        })
+      })
+    }
+  }, [convexTraces, addTrace, clearTraces])
 
   const graphNodes = GRAPH_NODES.map((id) => {
     const nodeState = nodes.get(id)
@@ -96,7 +218,11 @@ function MainApp() {
   )
 
   return (
-    <AppShell>
+    <AppShell
+      currentSessionId={sessionIdRef.current}
+      onSelectSession={handleSelectSession}
+      onNewSession={handleNewSession}
+    >
       <div className="flex flex-col h-full">
         <SplitPane left={leftPanel} right={rightPanel} className="flex-1" />
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { Icon } from '@/components/ui/Icon'
 import { formatTimestamp, formatDuration } from '@/lib/utils'
@@ -8,8 +8,11 @@ interface TraceItemProps {
   trace: TraceEntry
 }
 
+const MESSAGE_PREVIEW_LENGTH = 150
+
 export function TraceItem({ trace }: TraceItemProps) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [isMessageExpanded, setIsMessageExpanded] = useState(false)
 
   const eventConfig = {
     start: { icon: 'play_arrow', color: 'text-[var(--color-info)]', bg: 'bg-[var(--color-info)]/10' },
@@ -20,6 +23,17 @@ export function TraceItem({ trace }: TraceItemProps) {
   }
 
   const config = eventConfig[trace.event] || eventConfig.custom
+  
+  const isLongMessage = useMemo(() => 
+    trace.message && trace.message.length > MESSAGE_PREVIEW_LENGTH,
+    [trace.message]
+  )
+  
+  const displayMessage = useMemo(() => {
+    if (!trace.message) return ''
+    if (isMessageExpanded || !isLongMessage) return trace.message
+    return trace.message.slice(0, MESSAGE_PREVIEW_LENGTH) + '...'
+  }, [trace.message, isMessageExpanded, isLongMessage])
 
   return (
     <div
@@ -34,11 +48,11 @@ export function TraceItem({ trace }: TraceItemProps) {
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-[var(--text-subtle)] font-mono">
             {formatTimestamp(trace.timestamp)}
           </span>
-          <span className="font-medium text-sm text-[var(--text-default)] truncate">
+          <span className="font-medium text-sm text-[var(--text-default)]">
             {trace.nodeId}
           </span>
           {trace.duration && (
@@ -49,9 +63,19 @@ export function TraceItem({ trace }: TraceItemProps) {
         </div>
 
         {trace.message && (
-          <p className="text-sm text-[var(--text-muted)] mt-0.5 truncate">
-            {trace.message}
-          </p>
+          <div className="mt-1">
+            <p className="text-sm text-[var(--text-muted)] whitespace-pre-wrap break-words">
+              {displayMessage}
+            </p>
+            {isLongMessage && (
+              <button
+                onClick={() => setIsMessageExpanded(!isMessageExpanded)}
+                className="text-xs text-[var(--accent-primary)] hover:underline mt-1"
+              >
+                {isMessageExpanded ? 'Show less' : 'Show more'}
+              </button>
+            )}
+          </div>
         )}
 
         {trace.payload && Object.keys(trace.payload).length > 0 && (
@@ -65,7 +89,7 @@ export function TraceItem({ trace }: TraceItemProps) {
         )}
 
         {isExpanded && trace.payload && (
-          <pre className="mt-2 p-2 rounded bg-[var(--bg-tertiary)] text-xs font-mono overflow-x-auto">
+          <pre className="mt-2 p-2 rounded bg-[var(--bg-tertiary)] text-xs font-mono overflow-x-auto max-h-96 overflow-y-auto">
             {JSON.stringify(trace.payload, null, 2)}
           </pre>
         )}

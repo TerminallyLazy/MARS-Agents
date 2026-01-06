@@ -2,15 +2,26 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Icon } from '@/components/ui/Icon'
+import { SessionSelector } from './SessionSelector'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
+import type { Id } from '../../../convex/_generated/dataModel'
 
 interface TopBarProps {
   onMenuClick?: () => void
+  currentSessionId?: Id<"sessions"> | null
+  onSelectSession?: (sessionId: Id<"sessions">) => void
+  onNewSession?: () => void
   className?: string
 }
 
-export function TopBar({ onMenuClick, className }: TopBarProps) {
+export function TopBar({ 
+  onMenuClick, 
+  currentSessionId,
+  onSelectSession,
+  onNewSession,
+  className 
+}: TopBarProps) {
   const { theme, setTheme, getResolvedTheme, researchBackend, setResearchBackend } = useSettingsStore()
   const globalHealth = useAgentStore((s) => s.globalHealth)
 
@@ -66,6 +77,14 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
       </div>
 
       <div className="flex items-center gap-2">
+        {onSelectSession && onNewSession && (
+          <SessionSelector
+            currentSessionId={currentSessionId ?? null}
+            onSelectSession={onSelectSession}
+            onNewSession={onNewSession}
+          />
+        )}
+
         <Button
           variant="ghost"
           size="sm"

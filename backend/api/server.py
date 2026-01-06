@@ -13,7 +13,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 # Gemini Deep Research configuration
-GEMINI_TIMEOUT_SECONDS = 600  # 10 minutes - Deep Research can take a while
+GEMINI_TIMEOUT_SECONDS = 2000  # 33 minutes - Deep Research can take a while
 GEMINI_MAX_RETRIES = 3
 GEMINI_RETRY_BASE_DELAY = 5  # seconds
 
@@ -161,25 +161,37 @@ async def stream_agent_execution(task: str, max_iterations: int) -> AsyncGenerat
 
 
 def _sanitize_output(output: dict) -> dict:
+    if not isinstance(output, dict):
+        return {}
+
     sanitized = {}
-    for key, value in output.items() if isinstance(output, dict) else []:
-        if key in ("scores", "iteration", "current_draft", "diagram", "feedback_history"):
-            if key == "current_draft" and isinstance(value, str) and len(value) > 2000:
-                sanitized[key] = value[:2000] + "... [truncated]"
-            else:
-                sanitized[key] = value
+    passthrough_keys = {
+        "scores",
+        "iteration",
+        "current_draft",
+        "diagram",
+        "feedback_history",
+        "thinking",
+        "thought",
+        "content",
+        "document",
+        "research_output",
+    }
+
+    for key, value in output.items():
+        if key in passthrough_keys:
+            sanitized[key] = value
         elif key == "reflection_memories" and isinstance(value, list):
             sanitized[key] = [
                 {
                     "iteration": m.iteration if hasattr(m, "iteration") else None,
                     "score": m.score if hasattr(m, "score") else None,
                     "improvement_suggestion": (
-                        m.improvement_suggestion[:500]
-                        if hasattr(m, "improvement_suggestion")
-                        else None
+                        m.improvement_suggestion if hasattr(m, "improvement_suggestion") else None
                     ),
+                    "reflection": m.reflection if hasattr(m, "reflection") else None,
                 }
-                for m in value[-3:]
+                for m in value[-10:]
             ]
     return sanitized
 
@@ -215,60 +227,136 @@ async def stream_run(request: RunRequest):
     )
 
 
+async def _execute_gemini_stream(client, task: str):
+    return client.interactions.create(
+        input=task,
+        agent="deep-research-pro-preview-12-2025",
+        background=True,
+        stream=True,
+        agent_config={"type": "deep-research", "thinking_summaries": "auto"},
+    )
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    error_str = str(error).lower()
+    retryable_patterns = [
+        "gateway_timeout",
+        "deadline expired",
+        "timeout",
+        "504",
+        "503",
+        "502",
+        "connection reset",
+        "connection closed",
+    ]
+    return any(pattern in error_str for pattern in retryable_patterns)
+
+
 async def stream_gemini_research(task: str) -> AsyncGenerator[str, None]:
-    try:
-        client = get_genai_client()
+    client = get_genai_client()
+    yield format_sse_event("run_start", {"task": task, "backend": "gemini"})
 
-        yield format_sse_event("run_start", {"task": task, "backend": "gemini"})
+    last_error = None
 
-        stream = client.interactions.create(
-            input=task,
-            agent="deep-research-pro-preview-12-2025",
-            background=True,
-            stream=True,
-            agent_config={"type": "deep-research", "thinking_summaries": "auto"},
-        )
+    for attempt in range(GEMINI_MAX_RETRIES):
+        try:
+            if attempt > 0:
+                delay = GEMINI_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                yield format_sse_event(
+                    "progress",
+                    {
+                        "message": f"Retry attempt {attempt + 1}/{GEMINI_MAX_RETRIES} after {delay}s delay..."
+                    },
+                )
+                await asyncio.sleep(delay)
 
-        interaction_id = None
-        current_draft = ""
-        token_count = 0
+            yield format_sse_event(
+                "node_start",
+                {"name": "gemini", "task": "Deep Research analysis"},
+            )
 
-        for chunk in stream:
-            if chunk.event_type == "interaction.start":
-                interaction_id = chunk.interaction.id
-                yield format_sse_event("interaction_start", {"interaction_id": interaction_id})
+            stream = await asyncio.wait_for(
+                asyncio.to_thread(_execute_gemini_stream, client, task),
+                timeout=GEMINI_TIMEOUT_SECONDS,
+            )
 
-            elif chunk.event_type == "content.delta":
-                if hasattr(chunk, "delta"):
-                    if chunk.delta.type == "text":
-                        text = chunk.delta.text
-                        current_draft += text
-                        token_count += len(text.split())
-                        yield format_sse_event("token", {"content": text})
-                        yield format_sse_event("draft_update", {"content": current_draft})
-                        yield format_sse_event("metrics", {"tokens": token_count})
+            interaction_id = None
+            current_draft = ""
+            token_count = 0
+            last_activity = asyncio.get_event_loop().time()
 
-                    elif chunk.delta.type == "thought_summary":
-                        thought_text = (
-                            chunk.delta.content.text
-                            if hasattr(chunk.delta.content, "text")
-                            else str(chunk.delta.content)
-                        )
-                        yield format_sse_event("thought", {"content": thought_text})
+            for chunk in stream:
+                last_activity = asyncio.get_event_loop().time()
 
-            elif chunk.event_type == "interaction.complete":
-                yield format_sse_event("run_end", {"status": "completed", "tokens": token_count})
-                break
+                if chunk.event_type == "interaction.start":
+                    interaction_id = chunk.interaction.id
+                    yield format_sse_event("interaction_start", {"interaction_id": interaction_id})
 
-            elif chunk.event_type == "error":
-                error_msg = str(chunk.error) if hasattr(chunk, "error") else "Unknown error"
-                yield format_sse_event("error", {"message": error_msg})
-                break
+                elif chunk.event_type == "content.delta":
+                    if hasattr(chunk, "delta"):
+                        if chunk.delta.type == "text":
+                            text = chunk.delta.text
+                            current_draft += text
+                            token_count += len(text.split())
+                            yield format_sse_event("token", {"content": text})
+                            yield format_sse_event("draft_update", {"content": current_draft})
+                            yield format_sse_event("metrics", {"tokens": token_count})
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        yield format_sse_event("error", {"message": str(e), "type": type(e).__name__})
+                        elif chunk.delta.type == "thought_summary":
+                            thought_text = (
+                                chunk.delta.content.text
+                                if hasattr(chunk.delta.content, "text")
+                                else str(chunk.delta.content)
+                            )
+                            yield format_sse_event("thought", {"content": thought_text})
+
+                elif chunk.event_type == "interaction.complete":
+                    yield format_sse_event(
+                        "node_end",
+                        {
+                            "name": "gemini",
+                            "output": {"tokens": token_count, "draft_length": len(current_draft)},
+                        },
+                    )
+                    yield format_sse_event(
+                        "run_end", {"status": "completed", "tokens": token_count}
+                    )
+                    return
+
+                elif chunk.event_type == "error":
+                    error_msg = str(chunk.error) if hasattr(chunk, "error") else "Unknown error"
+                    raise Exception(f"Gemini API error: {error_msg}")
+
+            yield format_sse_event("run_end", {"status": "completed", "tokens": token_count})
+            return
+
+        except asyncio.TimeoutError:
+            last_error = Exception(f"Request timed out after {GEMINI_TIMEOUT_SECONDS} seconds")
+            yield format_sse_event(
+                "progress",
+                {"message": f"Timeout after {GEMINI_TIMEOUT_SECONDS}s, will retry..."},
+            )
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            last_error = e
+            if not _is_retryable_error(e):
+                yield format_sse_event("error", {"message": str(e), "type": type(e).__name__})
+                return
+            yield format_sse_event(
+                "progress",
+                {"message": f"Retryable error: {str(e)[:100]}..."},
+            )
+
+    yield format_sse_event(
+        "error",
+        {
+            "message": f"Failed after {GEMINI_MAX_RETRIES} attempts. Last error: {str(last_error)}",
+            "type": "MaxRetriesExceeded",
+        },
+    )
 
 
 @app.post("/api/research/gemini/stream")

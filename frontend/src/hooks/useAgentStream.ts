@@ -10,8 +10,26 @@ interface StreamEvent {
   timestamp: string
 }
 
+const NODE_LABELS: Record<string, string> = {
+  entry: 'Initializing',
+  specialist_agent: 'Specialist Agents',
+  refiner: 'Refining Output',
+  critique: 'Analyzing Quality',
+  judge: 'Scoring Response',
+  reflection: 'Extracting Learnings',
+  consensus: 'Building Consensus',
+  meta_learning: 'Adapting Strategy',
+  memory_evolution: 'Evolving Memory',
+  loop_decision: 'Deciding Next Step',
+  self_healing: 'Recovery Mode',
+  diagram: 'Generating Output',
+  gemini: 'Deep Research',
+  web_research: 'Web Search',
+}
+
 export function useAgentStream() {
   const abortControllerRef = useRef<AbortController | null>(null)
+  const progressMessageIdRef = useRef<string | null>(null)
 
   const {
     setRunning,
@@ -30,12 +48,13 @@ export function useAgentStream() {
     reset: resetAgentStore,
   } = useAgentStore()
 
-  const { addMessage, updateMessage, setStreaming, appendToMessage } = useChatStore()
+  const { addMessage, updateMessage, setStreaming, appendToMessage, setMessageMetadata } = useChatStore()
   const researchBackend = useSettingsStore((s) => s.researchBackend)
 
   const startStream = useCallback(
     async (task: string): Promise<() => void> => {
       resetAgentStore()
+      progressMessageIdRef.current = null
       setRunning(true)
 
       const messageId = addMessage({
@@ -130,6 +149,26 @@ export function useAgentStream() {
     [resetAgentStore, setRunning, addMessage, setStreaming, updateMessage, setActiveNode, researchBackend, addTrace, setGlobalHealth]
   )
 
+  const updateProgressMessage = useCallback(
+    (nodeName: string, status: 'start' | 'end' | 'progress', details?: string) => {
+      const label = NODE_LABELS[nodeName] || nodeName
+      
+      if (!progressMessageIdRef.current) {
+        progressMessageIdRef.current = addMessage({
+          role: 'assistant',
+          content: '',
+          metadata: { isStreaming: true, nodeId: nodeName },
+        })
+      }
+      
+      const statusIcon = status === 'start' ? '⏳' : status === 'end' ? '✓' : '→'
+      const progressLine = `${statusIcon} ${label}${details ? `: ${details}` : ''}\n`
+      
+      appendToMessage(progressMessageIdRef.current, progressLine)
+    },
+    [addMessage, appendToMessage]
+  )
+
   const handleEvent = useCallback(
     (event: StreamEvent, messageId: string) => {
       const { event: eventType, data } = event
@@ -153,6 +192,9 @@ export function useAgentStream() {
             if (task) {
               setNodeTask(nodeName, task)
             }
+            
+            updateProgressMessage(nodeName, 'start', task)
+            
             addTrace({
               nodeId: nodeName,
               event: 'start',
@@ -169,16 +211,20 @@ export function useAgentStream() {
             updateNode(nodeName, 'success', data.output)
 
             const output = data.output as Record<string, unknown> | undefined
+            let summary = ''
+            
             if (output) {
               if (output.scores && Array.isArray(output.scores)) {
                 const latestScore = output.scores[output.scores.length - 1]
                 if (typeof latestScore === 'number') {
                   addScore(latestScore)
+                  summary = `Score: ${latestScore.toFixed(1)}`
                 }
               }
 
               if (output.iteration && typeof output.iteration === 'number') {
                 setIteration(output.iteration)
+                setMessageMetadata(messageId, { iteration: output.iteration })
               }
 
               if (output.current_draft && typeof output.current_draft === 'string') {
@@ -199,6 +245,8 @@ export function useAgentStream() {
                 })
               }
             }
+
+            updateProgressMessage(nodeName, 'end', summary)
 
             addTrace({
               nodeId: nodeName,
@@ -222,6 +270,8 @@ export function useAgentStream() {
         case 'thought': {
           const thought = data.content as string
           if (thought) {
+            updateProgressMessage('gemini', 'progress', `Thinking: ${thought.slice(0, 100)}${thought.length > 100 ? '...' : ''}`)
+            
             addTrace({
               nodeId: 'gemini',
               event: 'custom',
@@ -243,6 +293,8 @@ export function useAgentStream() {
         case 'progress': {
           const message = data.message as string
           if (message) {
+            updateProgressMessage('system', 'progress', message)
+            
             addTrace({
               nodeId: 'system',
               event: 'custom',
@@ -255,6 +307,8 @@ export function useAgentStream() {
 
         case 'web_search_start': {
           const query = data.query as string
+          updateProgressMessage('web_research', 'start', query)
+          
           addTrace({
             nodeId: 'web_research',
             event: 'start',
@@ -267,6 +321,9 @@ export function useAgentStream() {
         case 'web_search_result': {
           const url = data.url as string
           const title = data.title as string
+          
+          updateProgressMessage('web_research', 'progress', `Found: ${title}`)
+          
           addTrace({
             nodeId: 'web_research',
             event: 'custom',
@@ -279,12 +336,20 @@ export function useAgentStream() {
 
         case 'web_search_end': {
           const count = data.count as number
+          updateProgressMessage('web_research', 'end', `${count} sources found`)
+          
           addTrace({
             nodeId: 'web_research',
             event: 'end',
             timestamp: new Date(),
             message: `Web search complete: ${count} sources`,
           })
+          break
+        }
+
+        case 'interaction_start': {
+          const interactionId = data.interaction_id as string
+          updateProgressMessage('gemini', 'start', `Session ${interactionId?.slice(0, 8) || 'started'}`)
           break
         }
 
@@ -303,6 +368,9 @@ export function useAgentStream() {
         case 'error':
           setGlobalHealth('critical')
           incrementErrors()
+          
+          updateProgressMessage('system', 'progress', `❌ Error: ${data.message}`)
+          
           addTrace({
             nodeId: 'system',
             event: 'error',
@@ -315,6 +383,13 @@ export function useAgentStream() {
         case 'run_end':
           setRunning(false)
           setActiveNode(null)
+          
+          if (progressMessageIdRef.current) {
+            appendToMessage(progressMessageIdRef.current, `\n✅ Research completed: ${data.status}`)
+            setMessageMetadata(progressMessageIdRef.current, { isStreaming: false })
+            progressMessageIdRef.current = null
+          }
+          
           addTrace({
             nodeId: 'system',
             event: 'end',
@@ -350,6 +425,8 @@ export function useAgentStream() {
       updateMetrics,
       incrementErrors,
       appendToMessage,
+      updateProgressMessage,
+      setMessageMetadata,
     ]
   )
 
