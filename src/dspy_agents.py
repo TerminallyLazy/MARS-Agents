@@ -1,5 +1,33 @@
+import asyncio
 import dspy
 from typing import Optional
+
+
+class WebResearchSignature(dspy.Signature):
+    """Determine what web research is needed and synthesize findings."""
+
+    task: str = dspy.InputField()
+    current_context: str = dspy.InputField()
+    guidance: str = dspy.InputField()
+    search_queries: str = dspy.OutputField(
+        desc="Comma-separated list of specific search queries to execute"
+    )
+    research_focus: str = dspy.OutputField(desc="Key areas to focus research on")
+
+
+class WebSynthesisSignature(dspy.Signature):
+    """Synthesize web research findings into actionable insights."""
+
+    task: str = dspy.InputField()
+    search_results: str = dspy.InputField()
+    guidance: str = dspy.InputField()
+    synthesized_findings: str = dspy.OutputField(
+        desc="Comprehensive synthesis of web research findings"
+    )
+    key_sources: str = dspy.OutputField(desc="Most valuable sources found with URLs")
+    confidence_assessment: str = dspy.OutputField(
+        desc="Assessment of information reliability and gaps"
+    )
 
 
 class DataProcessingSignature(dspy.Signature):
@@ -251,6 +279,69 @@ class DiagramGenerator(dspy.Module):
         }
 
 
+class WebResearchAgent(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.planner = dspy.ChainOfThought(WebResearchSignature)
+        self.synthesizer = dspy.ChainOfThought(WebSynthesisSignature)
+
+    def forward(self, task: str, current_context: str, guidance: str) -> dict:
+        from src.web_search import WebSearchAgent
+
+        plan = self.planner(task=task, current_context=current_context, guidance=guidance)
+
+        queries = [q.strip() for q in plan.search_queries.split(",") if q.strip()][:3]
+
+        if not queries:
+            queries = [task[:100]]
+
+        all_results = []
+        search_agent = WebSearchAgent(max_results=3)
+
+        for query in queries:
+            try:
+                response = asyncio.get_event_loop().run_until_complete(search_agent.search(query))
+                if response.results:
+                    for result in response.results:
+                        all_results.append(
+                            f"Source: {result.url}\nTitle: {result.title}\n{result.snippet}"
+                        )
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    response = loop.run_until_complete(search_agent.search(query))
+                    if response.results:
+                        for result in response.results:
+                            all_results.append(
+                                f"Source: {result.url}\nTitle: {result.title}\n{result.snippet}"
+                            )
+                finally:
+                    loop.close()
+            except Exception:
+                pass
+
+        if not all_results:
+            return {
+                "agent_name": "WebResearchAgent",
+                "content": f"Research Focus: {plan.research_focus}\n\nNo web results found for queries: {queries}",
+                "confidence": 0.3,
+            }
+
+        search_results_text = "\n\n---\n\n".join(all_results[:10])
+
+        synthesis = self.synthesizer(
+            task=task, search_results=search_results_text, guidance=guidance
+        )
+
+        return {
+            "agent_name": "WebResearchAgent",
+            "content": f"{synthesis.synthesized_findings}\n\nKey Sources:\n{synthesis.key_sources}\n\nConfidence: {synthesis.confidence_assessment}",
+            "confidence": 0.85,
+            "sources_count": len(all_results),
+        }
+
+
 AGENT_REGISTRY = {
     "data_processing": DataProcessingAgent,
     "analysis": AnalysisAgent,
@@ -258,6 +349,7 @@ AGENT_REGISTRY = {
     "learning": LearningAgent,
     "optimization": OptimizationAgent,
     "creative": CreativeAgent,
+    "web_research": WebResearchAgent,
 }
 
 

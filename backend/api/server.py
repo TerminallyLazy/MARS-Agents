@@ -12,6 +12,11 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+# Gemini Deep Research configuration
+GEMINI_TIMEOUT_SECONDS = 600  # 10 minutes - Deep Research can take a while
+GEMINI_MAX_RETRIES = 3
+GEMINI_RETRY_BASE_DELAY = 5  # seconds
+
 # Lazy import google.genai to avoid startup errors if not installed
 _genai_client = None
 
@@ -58,7 +63,7 @@ class GraphSchema(BaseModel):
     end: str
 
 
-GRAPH_NODES = [
+GRAPH_NODES = {
     "entry",
     "specialist_agent",
     "refiner",
@@ -71,7 +76,9 @@ GRAPH_NODES = [
     "loop_decision",
     "self_healing",
     "diagram",
-]
+}
+
+GRAPH_NODES_LIST = list(GRAPH_NODES)
 
 GRAPH_EDGES = [
     ("entry", "specialist_agent"),
@@ -110,31 +117,42 @@ async def stream_agent_execution(task: str, max_iterations: int) -> AsyncGenerat
             initial_state, {"recursion_limit": 150}, version="v2"
         ):
             event_name = event.get("event", "unknown")
-            event_data = {
-                "name": event.get("name", ""),
-                "run_id": event.get("run_id", ""),
-                "tags": event.get("tags", []),
-            }
+            node_name = event.get("name", "")
+
+            if node_name not in GRAPH_NODES:
+                if event_name == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk", {})
+                    content = chunk.content if hasattr(chunk, "content") else str(chunk)
+                    if content:
+                        yield format_sse_event("token", {"content": content})
+                continue
 
             if event_name == "on_chain_start":
-                event_data["metadata"] = event.get("metadata", {})
-                yield format_sse_event("node_start", event_data)
+                metadata = event.get("metadata", {})
+                yield format_sse_event(
+                    "node_start",
+                    {
+                        "name": node_name,
+                        "run_id": event.get("run_id", ""),
+                        "metadata": metadata,
+                    },
+                )
 
             elif event_name == "on_chain_end":
                 output = event.get("data", {}).get("output", {})
-                event_data["output"] = _sanitize_output(output)
-                yield format_sse_event("node_end", event_data)
-
-            elif event_name == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk", {})
-                content = chunk.content if hasattr(chunk, "content") else str(chunk)
-                if content:
-                    yield format_sse_event("token", {"content": content})
+                sanitized = _sanitize_output(output)
+                yield format_sse_event(
+                    "node_end",
+                    {
+                        "name": node_name,
+                        "run_id": event.get("run_id", ""),
+                        "output": sanitized,
+                    },
+                )
 
             elif event_name == "on_custom_event":
-                custom_name = event.get("name", "")
                 custom_data = event.get("data", {})
-                yield format_sse_event(f"custom_{custom_name}", custom_data)
+                yield format_sse_event(f"custom_{node_name}", custom_data)
 
         yield format_sse_event("run_end", {"status": "completed"})
 
@@ -202,7 +220,6 @@ async def stream_gemini_research(task: str) -> AsyncGenerator[str, None]:
         client = get_genai_client()
 
         yield format_sse_event("run_start", {"task": task, "backend": "gemini"})
-        yield format_sse_event("progress", {"message": "Starting Gemini Deep Research..."})
 
         stream = client.interactions.create(
             input=task,
@@ -214,21 +231,23 @@ async def stream_gemini_research(task: str) -> AsyncGenerator[str, None]:
 
         interaction_id = None
         current_draft = ""
+        token_count = 0
 
         for chunk in stream:
             if chunk.event_type == "interaction.start":
                 interaction_id = chunk.interaction.id
-                yield format_sse_event(
-                    "progress", {"message": f"Research initiated: {interaction_id}"}
-                )
+                yield format_sse_event("interaction_start", {"interaction_id": interaction_id})
 
             elif chunk.event_type == "content.delta":
                 if hasattr(chunk, "delta"):
                     if chunk.delta.type == "text":
                         text = chunk.delta.text
                         current_draft += text
+                        token_count += len(text.split())
                         yield format_sse_event("token", {"content": text})
                         yield format_sse_event("draft_update", {"content": current_draft})
+                        yield format_sse_event("metrics", {"tokens": token_count})
+
                     elif chunk.delta.type == "thought_summary":
                         thought_text = (
                             chunk.delta.content.text
@@ -238,7 +257,7 @@ async def stream_gemini_research(task: str) -> AsyncGenerator[str, None]:
                         yield format_sse_event("thought", {"content": thought_text})
 
             elif chunk.event_type == "interaction.complete":
-                yield format_sse_event("run_end", {"status": "completed"})
+                yield format_sse_event("run_end", {"status": "completed", "tokens": token_count})
                 break
 
             elif chunk.event_type == "error":
@@ -273,7 +292,7 @@ async def stream_gemini_run(request: RunRequest):
 @app.get("/api/graph/schema")
 async def get_graph_schema() -> GraphSchema:
     return GraphSchema(
-        nodes=GRAPH_NODES,
+        nodes=GRAPH_NODES_LIST,
         edges=GRAPH_EDGES,
         entry="entry",
         end="diagram",

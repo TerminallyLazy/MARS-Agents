@@ -8,8 +8,15 @@ interface DiagramViewerProps {
   className?: string
 }
 
+function extractMermaidCode(raw: string): string {
+  const fencePattern = /^```(?:mermaid)?\s*\n?([\s\S]*?)\n?```$/
+  const match = raw.trim().match(fencePattern)
+  return match ? match[1].trim() : raw.trim()
+}
+
 export function DiagramViewer({ code, className }: DiagramViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const diagramIdRef = useRef(0)
 
   useEffect(() => {
     if (!code || !containerRef.current) return
@@ -23,7 +30,9 @@ export function DiagramViewer({ code, className }: DiagramViewerProps) {
           fontFamily: 'var(--font-sans)',
         })
 
-        const { svg } = await mermaid.render('mermaid-diagram', code)
+        const cleanCode = extractMermaidCode(code)
+        diagramIdRef.current += 1
+        const { svg } = await mermaid.render(`mermaid-diagram-${diagramIdRef.current}`, cleanCode)
         if (containerRef.current) {
           containerRef.current.innerHTML = svg
         }

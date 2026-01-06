@@ -7,6 +7,7 @@ interface AgentNodeProps {
   label: string
   status: NodeStatus
   isActive?: boolean
+  currentTask?: string
   className?: string
 }
 
@@ -14,6 +15,7 @@ export function AgentNode({
   label,
   status,
   isActive = false,
+  currentTask,
   className,
 }: AgentNodeProps) {
   const statusConfig = {
@@ -54,7 +56,7 @@ export function AgentNode({
   return (
     <div
       className={cn(
-        'flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)]',
+        'flex flex-col gap-1 px-3 py-2 rounded-[var(--radius-md)]',
         'border transition-all duration-[var(--transition-fast)]',
         config.bg,
         config.border,
@@ -63,17 +65,24 @@ export function AgentNode({
         className
       )}
     >
-      <Icon name={config.icon} size="sm" className={config.color} />
-      <span
-        className={cn(
-          'text-sm font-medium',
-          status === 'pending' || status === 'skipped'
-            ? 'text-[var(--text-muted)]'
-            : 'text-[var(--text-default)]'
-        )}
-      >
-        {label}
-      </span>
+      <div className="flex items-center gap-2">
+        <Icon name={config.icon} size="sm" className={config.color} />
+        <span
+          className={cn(
+            'text-sm font-medium',
+            status === 'pending' || status === 'skipped'
+              ? 'text-[var(--text-muted)]'
+              : 'text-[var(--text-default)]'
+          )}
+        >
+          {label}
+        </span>
+      </div>
+      {currentTask && status === 'running' && (
+        <p className="text-xs text-[var(--text-subtle)] ml-6 truncate">
+          {currentTask}
+        </p>
+      )}
     </div>
   )
 }

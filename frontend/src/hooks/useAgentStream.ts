@@ -17,6 +17,7 @@ export function useAgentStream() {
     setRunning,
     setActiveNode,
     updateNode,
+    setNodeTask,
     addTrace,
     addScore,
     setBoosted,
@@ -24,6 +25,8 @@ export function useAgentStream() {
     setDiagram,
     setGlobalHealth,
     setIteration,
+    updateMetrics,
+    incrementErrors,
     reset: resetAgentStore,
   } = useAgentStore()
 
@@ -146,11 +149,15 @@ export function useAgentStream() {
           if (nodeName) {
             setActiveNode(nodeName)
             updateNode(nodeName, 'running')
+            const task = (data.task as string) || (data.metadata as Record<string, unknown>)?.task as string
+            if (task) {
+              setNodeTask(nodeName, task)
+            }
             addTrace({
               nodeId: nodeName,
               event: 'start',
               timestamp: new Date(),
-              message: `${nodeName} started`,
+              message: `${nodeName} started${task ? `: ${task}` : ''}`,
             })
           }
           break
@@ -246,8 +253,56 @@ export function useAgentStream() {
           break
         }
 
+        case 'web_search_start': {
+          const query = data.query as string
+          addTrace({
+            nodeId: 'web_research',
+            event: 'start',
+            timestamp: new Date(),
+            message: `Searching: ${query}`,
+          })
+          break
+        }
+
+        case 'web_search_result': {
+          const url = data.url as string
+          const title = data.title as string
+          addTrace({
+            nodeId: 'web_research',
+            event: 'custom',
+            timestamp: new Date(),
+            message: `Found: ${title}`,
+            payload: { url, title },
+          })
+          break
+        }
+
+        case 'web_search_end': {
+          const count = data.count as number
+          addTrace({
+            nodeId: 'web_research',
+            event: 'end',
+            timestamp: new Date(),
+            message: `Web search complete: ${count} sources`,
+          })
+          break
+        }
+
+        case 'metrics': {
+          const tokens = data.tokens as number | undefined
+          const thoughts = data.thoughts as number | undefined
+          if (tokens !== undefined || thoughts !== undefined) {
+            updateMetrics({
+              ...(tokens !== undefined && { totalTokens: tokens }),
+              ...(thoughts !== undefined && { thoughtCount: thoughts }),
+            })
+          }
+          break
+        }
+
         case 'error':
           setGlobalHealth('critical')
+          incrementErrors()
           addTrace({
             nodeId: 'system',
             event: 'error',
@@ -283,6 +338,7 @@ export function useAgentStream() {
     [
       setActiveNode,
       updateNode,
+      setNodeTask,
       addTrace,
       addScore,
       setBoosted,
@@ -291,6 +347,8 @@ export function useAgentStream() {
       setGlobalHealth,
       setIteration,
       setRunning,
+      updateMetrics,
+      incrementErrors,
       appendToMessage,
     ]
   )

@@ -6,6 +6,7 @@ interface GraphNodeData {
   id: string
   label: string
   status: NodeStatus
+  currentTask?: string
 }
 
 interface AgentGraphProps {
@@ -37,6 +38,7 @@ export function AgentGraph({ nodes, activeNodeId, className }: AgentGraphProps) 
               label={node.label}
               status={node.status}
               isActive={node.id === activeNodeId}
+              currentTask={node.currentTask}
             />
           </div>
         ))}

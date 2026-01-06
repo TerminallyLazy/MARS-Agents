@@ -3,3 +3,5 @@ langchain-openai
 dspy-ai
 pydantic
 python-dotenv
+crawl4ai
+google-genai

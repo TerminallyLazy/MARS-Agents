@@ -11,6 +11,7 @@ import { ScoreChart } from '@/components/monitoring/ScoreChart'
 import { InputBar } from '@/components/landing/InputBar'
 import { useAgentStore } from '@/stores/agentStore'
 import { useChatStore } from '@/stores/chatStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStream } from '@/hooks/useAgentStream'
 import { GRAPH_NODES } from '@/lib/constants'
 
@@ -35,6 +36,7 @@ function MainApp() {
 
   const { messages, isStreaming, addMessage } = useChatStore()
   const { startStream } = useAgentStream()
+  const researchBackend = useSettingsStore((s) => s.researchBackend)
 
   const handleStartTask = (prompt: string) => {
     addMessage({ role: 'user', content: prompt })
@@ -55,8 +57,11 @@ function MainApp() {
       id,
       label: id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       status: nodeState?.status || 'pending',
+      currentTask: nodeState?.currentTask,
     }
   })
+  
+  const isLangGraph = researchBackend === 'langgraph'
 
   if (view === 'landing') {
     return <LandingScreen onSubmit={handleStartTask} />
@@ -71,10 +76,12 @@ function MainApp() {
       />
 
       <div className="border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
-        <AgentGraph
-          nodes={graphNodes.slice(0, 6)}
-          activeNodeId={activeNode || undefined}
-        />
+        {isLangGraph && (
+          <AgentGraph
+            nodes={graphNodes.slice(0, 6)}
+            activeNodeId={activeNode || undefined}
+          />
+        )}
         <ScoreChart scores={scores} />
       </div>
     </div>

@@ -31,6 +31,17 @@ interface NodeState {
   startTime?: Date
   endTime?: Date
   output?: unknown
+  currentTask?: string
+  feedback?: string
+}
+
+export interface MetricsState {
+  totalTokens: number
+  thoughtCount: number
+  errorCount: number
+  latencyMs: number
+  nodesCompleted: number
+  nodesTotal: number
 }
 
 interface AgentStore {
@@ -54,9 +65,14 @@ interface AgentStore {
   reflections: ReflectionMemory[]
   agentOutputs: AgentOutput[]
   
+  metrics: MetricsState
+  startTime: Date | null
+  
   setRunning: (running: boolean) => void
   setActiveNode: (node: GraphNode | null) => void
   updateNode: (nodeId: GraphNode, status: NodeStatus, output?: unknown) => void
+  setNodeTask: (nodeId: GraphNode, task: string) => void
+  setNodeFeedback: (nodeId: GraphNode, feedback: string) => void
   
   setIteration: (iteration: number) => void
   addScore: (score: number) => void
@@ -73,7 +89,19 @@ interface AgentStore {
   addReflection: (reflection: ReflectionMemory) => void
   addAgentOutput: (output: AgentOutput) => void
   
+  updateMetrics: (updates: Partial<MetricsState>) => void
+  incrementErrors: () => void
+  
   reset: () => void
+}
+
+const initialMetrics: MetricsState = {
+  totalTokens: 0,
+  thoughtCount: 0,
+  errorCount: 0,
+  latencyMs: 0,
+  nodesCompleted: 0,
+  nodesTotal: 12,
 }
 
 const initialState = {
@@ -92,6 +120,8 @@ const initialState = {
   diagram: '',
   reflections: [] as ReflectionMemory[],
   agentOutputs: [] as AgentOutput[],
+  metrics: initialMetrics,
+  startTime: null as Date | null,
 }
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
@@ -112,8 +142,31 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       startTime: status === 'running' ? now : existing?.startTime,
       endTime: status !== 'running' && status !== 'pending' ? now : undefined,
       output: output ?? existing?.output,
+      currentTask: existing?.currentTask,
+      feedback: existing?.feedback,
     })
     
+    if (status === 'success' || status === 'error') {
+      const completed = Array.from(nodes.values()).filter(
+        n => n.status === 'success' || n.status === 'error'
+      ).length
+      set({ nodes, metrics: { ...get().metrics, nodesCompleted: completed } })
+    } else {
+      set({ nodes })
+    }
+  },
+  
+  setNodeTask: (nodeId, task) => {
+    const nodes = new Map(get().nodes)
+    const existing = nodes.get(nodeId) || { id: nodeId, status: 'pending' as NodeStatus }
+    nodes.set(nodeId, { ...existing, currentTask: task })
+    set({ nodes })
+  },
+  
+  setNodeFeedback: (nodeId, feedback) => {
+    const nodes = new Map(get().nodes)
+    const existing = nodes.get(nodeId) || { id: nodeId, status: 'pending' as NodeStatus }
+    nodes.set(nodeId, { ...existing, feedback })
     set({ nodes })
   },
   
@@ -156,9 +209,19 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     agentOutputs: [...state.agentOutputs, output],
   })),
   
+  updateMetrics: (updates) => set((state) => ({
+    metrics: { ...state.metrics, ...updates },
+  })),
+  
+  incrementErrors: () => set((state) => ({
+    metrics: { ...state.metrics, errorCount: state.metrics.errorCount + 1 },
+  })),
+  
   reset: () => set({
     ...initialState,
     nodes: new Map(),
     agentHealth: new Map(),
+    metrics: { ...initialMetrics },
+    startTime: new Date(),
   }),
 }))

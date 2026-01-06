@@ -20,6 +20,7 @@ export const SPECIALIST_AGENTS = [
   'learning',
   'optimization',
   'creative',
+  'web_research',
 ] as const
 
 export const NODE_STATUS = {
